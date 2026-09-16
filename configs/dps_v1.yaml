@@ -28,16 +28,16 @@ diffusion:
 training:
   output_root: outputs/train
   resume_output_dir: null
-  epochs: 500
-  batch_size: 32
+  epochs: 100
+  batch_size: 512
   learning_rate: 0.0002
   weight_decay: 0.00001
   gradient_clip: 1.0
   save_every_epochs: 10
   early_stopping:
     enabled: true
-    patience: 20
-    min_delta: 0.00001
+    patience: 5
+    min_delta: 0.001
 
 validation:
   seed: 10233
