@@ -1,0 +1,35 @@
+{
+  "best_checkpoint": "/Users/ivan/Desktop/2609_RDPS/outputs/smoke/train/train_20260915T164610.433490Z/checkpoints/best.pt",
+  "best_validation_loss": 1.090808391571045,
+  "dataset": "/Users/ivan/Desktop/2609_RDPS/datasets/smoke/dps_smoke.h5",
+  "device": "cpu",
+  "elapsed_seconds": 0.038483999989693984,
+  "global_step": 2,
+  "last_checkpoint": "/Users/ivan/Desktop/2609_RDPS/outputs/smoke/train/train_20260915T164610.433490Z/checkpoints/last.pt",
+  "output_dir": "/Users/ivan/Desktop/2609_RDPS/outputs/smoke/train/train_20260915T164610.433490Z",
+  "seed": 233,
+  "split": {
+    "algorithm": "example-permutation-v1",
+    "examples_per_stratum": {
+      "test": 1,
+      "train": 2,
+      "validation": 1
+    },
+    "ratios": {
+      "test": 0.25,
+      "train": 0.5,
+      "validation": 0.25
+    },
+    "sample_count": 8,
+    "seed": 17,
+    "selected_examples": [
+      0,
+      2
+    ],
+    "selected_split": "train",
+    "strata": 4
+  },
+  "status": "complete",
+  "train_loss": 1.0455735921859741,
+  "validation_loss": 1.090808391571045
+}

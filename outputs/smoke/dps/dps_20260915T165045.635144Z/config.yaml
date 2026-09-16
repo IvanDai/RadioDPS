@@ -1,0 +1,42 @@
+checkpoint: /Users/ivan/Desktop/2609_RDPS/outputs/smoke/train/train_20260915T164751.710710Z/checkpoints/last.pt
+checkpoint_step: 3
+model:
+  in_channels: 2
+  out_channels: 2
+  base_channels: 8
+  channel_multipliers:
+  - 1
+  - 2
+  num_res_blocks: 1
+  dropout: 0.0
+diffusion:
+  steps: 8
+  schedule: linear
+  beta_start: 0.0001
+  beta_end: 0.02
+dataset: /Users/ivan/Desktop/2609_RDPS/datasets/smoke/dps_smoke.h5
+dataset_split:
+  algorithm: example-permutation-v1
+  seed: 17
+  ratios:
+    train: 0.5
+    validation: 0.25
+    test: 0.25
+  examples_per_stratum:
+    train: 2
+    validation: 1
+    test: 1
+  strata: 4
+  selected_split: test
+  selected_examples:
+  - 3
+  sample_count: 4
+seed: 233
+device: cpu
+sample_count: 1
+sampling_steps: 4
+guidance_scale: 0.05
+likelihood: normalized
+measurement_eps: 1.0e-08
+clip_denoised: false
+output_dir: /Users/ivan/Desktop/2609_RDPS/outputs/smoke/dps/dps_20260915T165045.635144Z

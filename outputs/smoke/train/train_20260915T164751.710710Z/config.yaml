@@ -1,0 +1,52 @@
+experiment: known_channel_dps_smoke
+seed: 233
+device: cpu
+dataset:
+  path: datasets/smoke/dps_smoke.h5
+  split_seed: 17
+  split_ratios:
+    train: 0.5
+    validation: 0.25
+    test: 0.25
+  num_workers: 0
+model:
+  in_channels: 2
+  out_channels: 2
+  base_channels: 8
+  channel_multipliers:
+  - 1
+  - 2
+  num_res_blocks: 1
+  dropout: 0.0
+diffusion:
+  steps: 8
+  schedule: linear
+  beta_start: 0.0001
+  beta_end: 0.02
+training:
+  output_root: outputs/smoke/train
+  batch_size: 4
+  learning_rate: 0.001
+  weight_decay: 0.0
+  max_steps: 3
+  validation_every: 1
+  checkpoint_every: 1
+  log_every: 1
+  gradient_clip: 1.0
+  max_validation_batches: 1
+  resume: /Users/ivan/Desktop/2609_RDPS/outputs/smoke/train/train_20260915T164610.433490Z/checkpoints/last.pt
+dps:
+  sampling_steps: 4
+  guidance_scale: 0.05
+  likelihood: normalized
+  measurement_eps: 1.0e-08
+  clip_denoised: false
+evaluation:
+  output_root: outputs/smoke/dps
+  sample_count: 1
+  plot_count: 1
+runtime:
+  device: cpu
+  dataset_path: /Users/ivan/Desktop/2609_RDPS/datasets/smoke/dps_smoke.h5
+  output_dir: /Users/ivan/Desktop/2609_RDPS/outputs/smoke/train/train_20260915T164751.710710Z
+  resume: /Users/ivan/Desktop/2609_RDPS/outputs/smoke/train/train_20260915T164610.433490Z/checkpoints/last.pt

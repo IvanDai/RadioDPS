@@ -1,0 +1,13 @@
+[build-system]
+requires=["setuptools>=68"]
+build-backend="setuptools.build_meta"
+[project]
+name="rsig-rdps"
+version="0.1.0"
+requires-python=">=3.10"
+dependencies=["numpy>=1.24","scipy>=1.10","h5py>=3.9","matplotlib>=3.8","torch>=2.1","PyYAML>=6.0"]
+[tool.setuptools.packages.find]
+where=["src"]
+include=["rsig*", "rdps*"]
+[tool.pytest.ini_options]
+pythonpath=["src"]

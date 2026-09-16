@@ -1,0 +1,51 @@
+experiment: known_channel_dps_v1
+seed: 233
+device: auto
+
+dataset:
+  path: datasets/dps_v1/dps_v1.h5
+  split_seed: 20260916
+  split_ratios:
+    train: 0.8
+    validation: 0.1
+    test: 0.1
+  num_workers: 4
+
+model:
+  in_channels: 2
+  out_channels: 2
+  base_channels: 64
+  channel_multipliers: [1, 2, 4, 8]
+  num_res_blocks: 2
+  dropout: 0.05
+
+diffusion:
+  steps: 1000
+  schedule: linear
+  beta_start: 0.0001
+  beta_end: 0.02
+
+training:
+  output_root: outputs/train
+  batch_size: 32
+  learning_rate: 0.0002
+  weight_decay: 0.00001
+  max_steps: 200000
+  validation_every: 1000
+  checkpoint_every: 5000
+  log_every: 50
+  gradient_clip: 1.0
+  max_validation_batches: null
+  resume: null
+
+dps:
+  sampling_steps: 250
+  guidance_scale: 0.05
+  likelihood: auto
+  measurement_eps: 1.0e-8
+  clip_denoised: false
+
+evaluation:
+  output_root: outputs/dps
+  sample_count: 16
+  plot_count: 4

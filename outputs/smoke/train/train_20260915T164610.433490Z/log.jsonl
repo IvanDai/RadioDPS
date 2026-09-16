@@ -1,0 +1,2 @@
+{"batch": 0, "elapsed_seconds": 0.018262875004438683, "epoch": 0, "gradient_norm": 1.8249640464782715, "step": 1, "train_loss": 1.1507524251937866, "validation_loss": 1.1140692234039307}
+{"batch": 1, "elapsed_seconds": 0.031918249995214865, "epoch": 0, "gradient_norm": 1.4739785194396973, "step": 2, "train_loss": 1.0455735921859741, "validation_loss": 1.090808391571045}

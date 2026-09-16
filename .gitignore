@@ -1,0 +1,73 @@
+# macOS and filesystem metadata
+.DS_Store
+._*
+Thumbs.db
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+
+# Python environments and packaging output
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Model and experiment artifacts
+checkpoints/
+runs/
+wandb/
+tensorboard/
+experiments/**/outputs/
+*.ckpt
+*.pth
+*.pt
+
+# Project-specific exclusions
+Preserved/
+Reference/
+references/
+archive/
+
+# Track only README files inside datasets (case-insensitive filename).
+datasets/**
+!datasets/**/
+!datasets/**/[Rr][Ee][Aa][Dd][Mm][Ee].[Mm][Dd]
+
+*.h5
+
+# Ignore every Markdown file except README files (case-insensitive filename).
+*.[Mm][Dd]
+![Rr][Ee][Aa][Dd][Mm][Ee].[Mm][Dd]
+!**/[Rr][Ee][Aa][Dd][Mm][Ee].[Mm][Dd]
+![Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+!docs/**/*.[Mm][Dd]
