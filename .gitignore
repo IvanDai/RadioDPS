@@ -60,6 +60,7 @@ archive/
 
 # Track only README files inside datasets (case-insensitive filename).
 datasets/**
+outputs/**
 !datasets/**/
 !datasets/**/[Rr][Ee][Aa][Dd][Mm][Ee].[Mm][Dd]
 

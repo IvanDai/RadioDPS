@@ -27,16 +27,23 @@ diffusion:
 
 training:
   output_root: outputs/smoke/train
+  resume_output_dir: null
+  epochs: 1
   batch_size: 4
   learning_rate: 0.001
   weight_decay: 0.0
-  max_steps: 2
-  validation_every: 1
-  checkpoint_every: 1
-  log_every: 1
   gradient_clip: 1.0
-  max_validation_batches: 1
-  resume: null
+  save_every_epochs: 1
+  early_stopping:
+    enabled: true
+    patience: 2
+    min_delta: 0.0
+
+validation:
+  seed: 1017
+  sample_count: 4
+  batch_size: 4
+  noise_repeats: 1
 
 dps:
   sampling_steps: 4
@@ -45,7 +52,21 @@ dps:
   measurement_eps: 1.0e-8
   clip_denoised: false
 
+dps_validation:
+  enabled: true
+  every_epochs: 1
+  seed: 2017
+  sample_count: 4
+  batch_size: 2
+  sampling_steps: 4
+  guidance_scale: 0.05
+  plot_count: 0
+
 evaluation:
   output_root: outputs/smoke/dps
-  sample_count: 1
-  plot_count: 1
+  seed: 3017
+  sample_count: 4
+  batch_size: 2
+  sampling_steps: 4
+  guidance_scale: 0.05
+  plot_count: 4

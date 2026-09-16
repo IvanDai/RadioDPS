@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Mapping
 
@@ -14,6 +15,7 @@ from torch.utils.data import Dataset
 
 SPLIT_ALGORITHM_VERSION = "example-permutation-v1"
 SPLIT_NAMES = ("train", "validation", "test")
+EVALUATION_SELECTION_VERSION = "balanced-modulation-condition-v1"
 
 
 def _split_counts(size: int, ratios: Mapping[str, float]) -> dict[str, int]:
@@ -47,6 +49,112 @@ def split_example_indices(
         result[name] = np.sort(permutation[offset : offset + counts[name]])
         offset += counts[name]
     return result
+
+
+def dataset_signature(path: str | Path) -> dict[str, object]:
+    """Return a lightweight identity for resume compatibility checks."""
+    path = Path(path).expanduser().resolve()
+    with h5py.File(path, "r") as handle:
+        raw_metadata = handle["metadata"][()]
+        if isinstance(raw_metadata, bytes):
+            raw_metadata = raw_metadata.decode("utf-8")
+        identity = {
+            "metadata": json.loads(str(raw_metadata)),
+            "modulations": list(handle["modulation"].asstr()[:]),
+            "noise_levels_db": [
+                None if np.isnan(value) else float(value)
+                for value in np.asarray(handle["noise_level_db"][:], dtype=np.float64)
+            ],
+            "arrays": {
+                name: {"shape": list(handle[name].shape), "dtype": str(handle[name].dtype)}
+                for name in ("x_tx", "h", "y_rx")
+            },
+        }
+        sample_seeds = handle.get("parameters/sample_seed")
+        if sample_seeds is not None:
+            identity["sample_seed_digest"] = hashlib.sha256(
+                np.ascontiguousarray(sample_seeds[:]).view(np.uint8)
+            ).hexdigest()
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {"sha256": hashlib.sha256(encoded).hexdigest(), **identity}
+
+
+def _balanced_quotas(
+    total: int,
+    keys: list[int],
+    capacities: Mapping[int, int],
+    rng: np.random.Generator,
+) -> dict[int, int]:
+    quotas = {key: 0 for key in keys}
+    priority = {key: rank for rank, key in enumerate(rng.permutation(keys).tolist())}
+    for _ in range(total):
+        available = [key for key in keys if quotas[key] < capacities[key]]
+        if not available:
+            break
+        selected = min(available, key=lambda key: (quotas[key], priority[key]))
+        quotas[selected] += 1
+    return quotas
+
+
+def balanced_subset_indices(
+    dataset: "HDF5WaveformDataset",
+    sample_count: int | None,
+    *,
+    seed: int,
+) -> tuple[list[int], dict[str, object]]:
+    """Select a reproducible subset balanced by modulation, then condition."""
+    if seed < 0:
+        raise ValueError("evaluation seed must be non-negative")
+    if len(dataset) < 1:
+        raise ValueError(f"{dataset.split} split is empty")
+    requested = len(dataset) if sample_count is None else int(sample_count)
+    if requested < 1:
+        raise ValueError("sample_count must be positive or null")
+    selected_count = min(requested, len(dataset))
+    rng = np.random.default_rng(seed)
+    strata: dict[int, dict[int, list[int]]] = {}
+    for dataset_index, (modulation, condition, _example) in enumerate(dataset.coordinates):
+        strata.setdefault(modulation, {}).setdefault(condition, []).append(dataset_index)
+
+    modulation_keys = sorted(strata)
+    modulation_capacities = {
+        modulation: sum(len(pool) for pool in conditions.values())
+        for modulation, conditions in strata.items()
+    }
+    modulation_quotas = _balanced_quotas(
+        selected_count, modulation_keys, modulation_capacities, rng
+    )
+    selected: list[int] = []
+    counts_by_condition: dict[str, int] = {}
+    for modulation in modulation_keys:
+        conditions = strata[modulation]
+        condition_keys = sorted(conditions)
+        condition_capacities = {key: len(conditions[key]) for key in condition_keys}
+        condition_quotas = _balanced_quotas(
+            modulation_quotas[modulation], condition_keys, condition_capacities, rng
+        )
+        for condition in condition_keys:
+            pool = np.asarray(conditions[condition], dtype=np.int64)
+            rng.shuffle(pool)
+            chosen = pool[: condition_quotas[condition]].tolist()
+            selected.extend(int(value) for value in chosen)
+            counts_by_condition[f"{modulation}:{condition}"] = len(chosen)
+    rng.shuffle(selected)
+    counts_by_modulation = {
+        dataset.modulations[modulation]: modulation_quotas[modulation]
+        for modulation in modulation_keys
+    }
+    manifest = {
+        "algorithm": EVALUATION_SELECTION_VERSION,
+        "seed": seed,
+        "requested_sample_count": requested,
+        "sample_count": len(selected),
+        "complete_modulation_coverage": all(value > 0 for value in counts_by_modulation.values()),
+        "counts_by_modulation": counts_by_modulation,
+        "counts_by_modulation_condition": counts_by_condition,
+        "coordinates": [list(dataset.coordinates[index]) for index in selected],
+    }
+    return selected, manifest
 
 
 class HDF5WaveformDataset(Dataset):
@@ -84,6 +192,7 @@ class HDF5WaveformDataset(Dataset):
             self.metadata = json.loads(str(raw_metadata))
             if self.metadata.get("version") != "rdps-rsig-hdf5-1":
                 raise ValueError("unsupported rsig HDF5 schema version")
+        self.signature = dataset_signature(self.path)
 
         examples = split_example_indices(
             self.grid_shape[2], seed=self.split_seed, ratios=self.split_ratios

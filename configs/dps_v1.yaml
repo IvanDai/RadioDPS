@@ -27,16 +27,23 @@ diffusion:
 
 training:
   output_root: outputs/train
+  resume_output_dir: null
+  epochs: 500
   batch_size: 32
   learning_rate: 0.0002
   weight_decay: 0.00001
-  max_steps: 200000
-  validation_every: 1000
-  checkpoint_every: 5000
-  log_every: 50
   gradient_clip: 1.0
-  max_validation_batches: null
-  resume: null
+  save_every_epochs: 10
+  early_stopping:
+    enabled: true
+    patience: 20
+    min_delta: 0.00001
+
+validation:
+  seed: 10233
+  sample_count: null
+  batch_size: 32
+  noise_repeats: 1
 
 dps:
   sampling_steps: 250
@@ -45,7 +52,21 @@ dps:
   measurement_eps: 1.0e-8
   clip_denoised: false
 
+dps_validation:
+  enabled: true
+  every_epochs: 10
+  seed: 20233
+  sample_count: 8
+  batch_size: 4
+  sampling_steps: 50
+  guidance_scale: 0.05
+  plot_count: 0
+
 evaluation:
   output_root: outputs/dps
-  sample_count: 16
+  seed: 30233
+  sample_count: 40
+  batch_size: 4
+  sampling_steps: 250
+  guidance_scale: 0.05
   plot_count: 4

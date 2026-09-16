@@ -15,9 +15,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path("configs/dps_v1.yaml"))
     parser.add_argument("--dataset", type=Path, help="override dataset.path")
     parser.add_argument("--output", type=Path, help="override training.output_root")
-    parser.add_argument("--resume", type=Path, help="resume model and optimizer state")
+    parser.add_argument("--resume-output", type=Path, help="existing training output directory")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps", "mlx"))
-    parser.add_argument("--max-steps", type=int, help="override training.max_steps")
+    parser.add_argument("--epochs", type=int, help="override training.epochs")
     return parser.parse_args()
 
 
@@ -26,14 +26,14 @@ def main() -> int:
     config = load_yaml(args.config)
     if args.dataset is not None:
         config["dataset"]["path"] = str(args.dataset)
-    if args.resume is not None:
-        config["training"]["resume"] = str(args.resume.resolve())
+    if args.resume_output is not None:
+        config["training"]["resume_output_dir"] = str(args.resume_output.resolve())
     if args.device is not None:
         config["device"] = args.device
-    if args.max_steps is not None:
-        if args.max_steps < 1:
-            raise ValueError("--max-steps must be positive")
-        config["training"]["max_steps"] = args.max_steps
+    if args.epochs is not None:
+        if args.epochs < 1:
+            raise ValueError("--epochs must be positive")
+        config["training"]["epochs"] = args.epochs
     output = train(config, output_root=args.output)
     print(f"Training output: {output}")
     return 0

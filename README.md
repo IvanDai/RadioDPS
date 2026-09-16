@@ -159,7 +159,10 @@ Blind-DPS 将 h 也作为未知变量，目标变为 p(x, h | y)。它需要信�
     src/rdps/diffusion.py   DDPM epsilon 训练、祖先采样和合法跳步后验
     src/rdps/operators.py   batch 复数 FIR forward/adjoint
     src/rdps/dps.py         measurement-guided posterior sampling
-    src/rdps/training.py    训练、验证、best/last checkpoint 和 resume
+    src/rdps/evaluation.py  固定 validation 与平衡、可复现的 DPS 评估
+    src/rdps/checkpoint.py  配置指纹、随机状态和原子 checkpoint
+    src/rdps/progress.py    原地刷新的 epoch/batch 训练进度
+    src/rdps/training.py    epoch 训练、Early Stopping 和目录级 resume
     src/rdps/metrics.py     waveform MSE、NMSE 和 measurement residual
 
 模型只以 `x_tx [B,2,T]` 训练无条件 prior。`h` 和 `y_rx` 仅在 DPS 推理时使用，
@@ -177,13 +180,19 @@ known-channel operator 严格计算
     ||y_rx - A_h(x_0_hat)||^2 / (||y_rx||^2 + eps)
 
 不会除以零噪声方差。`dps.likelihood: gaussian` 为后续 AWGN 数据提供
-`||residual||^2 / (2 * noise_variance)`；`auto` 在所有 batch 样本方差为正时选择
-Gaussian likelihood，否则选择归一化误差。
+`||residual||^2 / (2 * noise_variance)`；`auto` 会逐样本判断，因此同一 batch 可以安全
+包含零噪声与非零 AWGN 样本。
 
-每个训练或推理命令都会创建带 UTC 时间戳的独立目录。训练目录包含实际
-`config.yaml`、`split.json`、`log.jsonl`、`metrics.json` 以及 `best.pt` 和
-`last.pt`。推理目录包含实际配置、逐样本及汇总指标、`reconstructions.h5` 和少量
-时域、频谱、IQ 散点对比图。这里定义
+新训练会创建带 UTC 时间戳的独立目录；resume 则继续使用原目录。训练以 epoch 为单位，
+每个 epoch 使用固定 validation seed 和固定 `(t, epsilon)` 条件比较 loss，并在 epoch
+结束保存 `last.pt`。`best.pt` 只由 validation loss 决定，Early Stopping 的 patience
+状态随 checkpoint 恢复。周期 DPS 只访问 validation split；训练或 Early Stopping 完成
+后才加载 `best.pt` 并访问 test split。
+
+训练目录包含实际 `config.yaml`、`split.json`、`validation_selection.json`、
+`history.jsonl`、`metrics.json`、checkpoint 以及 validation/test evaluation 子目录。
+推理目录包含实际配置、确定性选择坐标、逐样本/per-modulation/macro/micro 指标、
+`reconstructions.h5` 和少量时域、频谱、IQ 散点对比图。这里定义
 
     MSE = mean(|x_tx - x_reconstructed|^2 over I/Q values)
     NMSE = ||x_tx - x_reconstructed||^2 / ||x_tx||^2
@@ -192,6 +201,18 @@ Gaussian likelihood，否则选择归一化误差。
 实现依据 DiffCom 的标准 posterior sampling：先从 epsilon prediction 得到
 `x_0_hat`，执行无条件祖先更新，再减去 measurement loss 对当前 `x_t` 的梯度。
 当前范围不含 HiFi-DiffCom、Blind-DPS 或自适应 timestep。
+
+评估按 modulation 均分样本配额，再在每个 modulation 内按 condition 均分；stratum
+内部由 evaluation seed 确定性抽样。正式汇总以 modulation macro mean 为主，同时保存
+普通 sample micro mean。若样本数少于 modulation 数量，程序会明确警告覆盖不完整。
+
+resume 配置使用 `training.resume_output_dir`。checkpoint 会校验数据集 signature、split、
+训练 seed、模型、diffusion、batch size、optimizer 超参数、固定 validation 设置和 Early
+Stopping 设置；只有 epochs、device、worker、显示与纯评估设置可以调整。旧的 step-based
+format-v1 checkpoint 不具备完整 epoch/patience 状态，因此会被明确拒绝，避免伪精确续训。
+resume 应只用于中断恢复，并在正式实验开始时设定完整 epoch 上限；不要查看 test 结果后再
+提高 epoch 上限，否则会把 test 信息反馈到训练决策中。跨 CPU/CUDA/MPS 恢复虽然允许，
+但浮点实现和设备随机数流不同，不能视为逐位一致的训练轨迹。
 
 参考：
 
@@ -210,14 +231,15 @@ Gaussian likelihood，否则选择归一化误差。
     conda run -n rfsig python run_dps.py \
       --checkpoint outputs/train/<run>/checkpoints/best.pt \
       --dataset datasets/dps_v1/dps_v1.h5 \
-      --split test --num-samples 16 --sampling-steps 250 \
-      --guidance-scale 0.05 --device cuda
+      --split test --num-samples 40 --sampling-steps 250 \
+      --guidance-scale 0.05 --evaluation-seed 30233 \
+      --batch-size 4 --device cuda
 
 `device: auto` 的优先级是 CUDA、Apple MPS、CPU。由于模型和 measurement autograd
 基于 PyTorch，命令行的 `--device mlx` 是 Apple 设备上的 MPS 别名，并不启用另一套
 MLX 模型实现。
 
-本机 smoke 配置只运行两个训练 step：
+本机 smoke 配置每个 epoch 只包含两个 batch：
 
     conda run -n rfsig python genDS_dps_v1.py \
       --output datasets/smoke/dps_smoke.h5 --examples-per-modulation 4 \
@@ -226,11 +248,12 @@ MLX 模型实现。
       --plots-per-modulation 1 --progress-every 4 --overwrite
     conda run -n rfsig python train_dps.py --config configs/dps_smoke.yaml
     conda run -n rfsig python train_dps.py --config configs/dps_smoke.yaml \
-      --resume outputs/smoke/train/<run>/checkpoints/last.pt --max-steps 3
+      --resume-output outputs/smoke/train/<run> --epochs 2
     conda run -n rfsig python run_dps.py \
-      --checkpoint outputs/smoke/train/<resumed-run>/checkpoints/last.pt \
-      --dataset datasets/smoke/dps_smoke.h5 --split test --num-samples 1 \
-      --sampling-steps 4 --guidance-scale 0.05 --device cpu \
+      --checkpoint outputs/smoke/train/<run>/checkpoints/best.pt \
+      --dataset datasets/smoke/dps_smoke.h5 --split test --num-samples 4 \
+      --sampling-steps 4 --guidance-scale 0.05 --evaluation-seed 3017 \
+      --batch-size 2 --device cpu \
       --output outputs/smoke/dps
 
 当前 macOS `rfsig` 环境同时加载了多个 OpenMP runtime。本机若遇到重复 runtime 或
