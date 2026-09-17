@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
+
+# PyTorch requires this before CUDA/cuBLAS initialization for deterministic GEMMs.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 from rdps.training import train
 from rdps.utils import load_yaml, optional_path

@@ -183,6 +183,32 @@ known-channel operator 严格计算
 `||residual||^2 / (2 * noise_variance)`；`auto` 会逐样本判断，因此同一 batch 可以安全
 包含零噪声与非零 AWGN 样本。
 
+上一段保留的是最初的归一化平方误差定义和兼容选项；当前配置改为下述显式
+`normalized_l2` 策略。生产范围 smoke（1000 个 diffusion steps，最高 timestep 999）
+发现，早期 8-step smoke 掩盖了高噪声区间的数值问题：`x_0_hat` 中的
+`1/sqrt(alpha_bar_t)` 放大与固定 guidance scale 叠加后，归一化平方误差的梯度会随
+观测残差继续增长，形成正反馈并最终产生 NaN/Inf。该问题在 CPU 上同样能够复现，
+因此不是 CUDA 或 CuBLAS 的非确定性导致。
+
+为保留可比较的实验定义，`normalized` 继续作为原归一化平方误差的兼容名称，并新增
+显式名称 `normalized_squared`。当前推荐的无噪声策略为 `normalized_l2`：
+
+    sqrt(||y_rx - A_h(x_0_hat)||^2 + eps)
+    / sqrt(||y_rx||^2 + eps)
+
+它与平方形式具有相同的最优点，但残差方向的梯度不会随残差幅度无限增长，更接近
+DiffCom 使用观测残差 L2 norm 的做法。为避免旧 checkpoint 静默改变语义，`auto` 仍对
+零噪声样本选择原归一化平方误差、对正噪声样本选择 Gaussian likelihood；新实验必须
+显式配置 `normalized_l2`。另设 `max_guidance_update_norm` 对每条样本实际施加的
+`guidance_scale * gradient` 做范数上限，并在评估结果中记录原始/实际 update norm 和
+裁剪比例。该上限是数值保护，不替代在 validation 上标定 guidance scale。由于合法射频
+波形幅度会超过 `[-1, 1]`，这里没有照搬图像模型的 `clip_denoised=True`。
+
+服务器上另一个 CuBLAS warning 与上述梯度发散无关：开启 PyTorch deterministic
+algorithms 后，CUDA 10.2 及以上还要求在 cuBLAS 初始化前设置
+`CUBLAS_WORKSPACE_CONFIG`。`train_dps.py` 和 `run_dps.py` 会以 `setdefault` 设置官方建议
+的 `:4096:8`，既消除该 warning，也不会覆盖用户在启动进程前显式选择的 `:16:8`。
+
 新训练会创建带 UTC 时间戳的独立目录；resume 则继续使用原目录。训练以 epoch 为单位，
 每个 epoch 使用固定 validation seed 和固定 `(t, epsilon)` 条件比较 loss，并在 epoch
 结束、开始 DPS validation 前保存 `last.pt`。`best.pt` 只由 validation loss 决定，Early
@@ -262,7 +288,8 @@ MLX 模型实现。
     conda run -n rfsig python run_dps.py \
       --checkpoint outputs/smoke/train/<run>/checkpoints/best.pt \
       --dataset datasets/smoke/dps_smoke.h5 --split test --num-samples 4 \
-      --sampling-steps 4 --guidance-scale 0.05 --evaluation-seed 3017 \
+      --sampling-steps 50 --guidance-scale 0.05 --evaluation-seed 3017 \
+      --likelihood normalized_l2 --max-guidance-update-norm 1.0 \
       --batch-size 2 --device cpu \
       --output outputs/smoke/dps
 

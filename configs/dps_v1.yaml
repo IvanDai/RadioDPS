@@ -48,9 +48,10 @@ validation:
 dps:
   sampling_steps: 250
   guidance_scale: 0.05
-  likelihood: auto
+  likelihood: normalized_l2
   measurement_eps: 1.0e-8
   clip_denoised: false
+  max_guidance_update_norm: 1.0
 
 dps_validation:
   enabled: true

@@ -20,7 +20,8 @@ model:
   dropout: 0.0
 
 diffusion:
-  steps: 8
+  # Match the production noise schedule; valid timestep indices are 0..999.
+  steps: 1000
   schedule: linear
   beta_start: 0.0001
   beta_end: 0.02
@@ -46,11 +47,12 @@ validation:
   noise_repeats: 1
 
 dps:
-  sampling_steps: 4
+  sampling_steps: 50
   guidance_scale: 0.05
-  likelihood: normalized
+  likelihood: normalized_l2
   measurement_eps: 1.0e-8
   clip_denoised: false
+  max_guidance_update_norm: 1.0
 
 dps_validation:
   enabled: true
@@ -58,7 +60,7 @@ dps_validation:
   seed: 2017
   sample_count: 4
   batch_size: 2
-  sampling_steps: 4
+  sampling_steps: 50
   guidance_scale: 0.05
   plot_count: 0
 
@@ -67,6 +69,6 @@ evaluation:
   seed: 3017
   sample_count: 4
   batch_size: 2
-  sampling_steps: 4
+  sampling_steps: 50
   guidance_scale: 0.05
   plot_count: 4

@@ -154,6 +154,9 @@ def evaluation_settings(config: dict[str, Any], section_name: str) -> dict[str, 
         "likelihood": section.get("likelihood", dps.get("likelihood", "auto")),
         "measurement_eps": float(section.get("measurement_eps", dps.get("measurement_eps", 1e-8))),
         "clip_denoised": bool(section.get("clip_denoised", dps.get("clip_denoised", False))),
+        "max_guidance_update_norm": section.get(
+            "max_guidance_update_norm", dps.get("max_guidance_update_norm")
+        ),
     }
 
 
@@ -237,6 +240,9 @@ def run_dps_evaluation(
 ) -> dict[str, Any]:
     if float(settings["measurement_eps"]) <= 0:
         raise ValueError("DPS measurement_eps must be positive")
+    max_update_norm = settings.get("max_guidance_update_norm")
+    if max_update_norm is not None and float(max_update_norm) <= 0:
+        raise ValueError("DPS max_guidance_update_norm must be positive or null")
     selected, selection = balanced_subset_indices(
         dataset, settings.get("sample_count"), seed=int(settings["seed"])
     )
@@ -291,6 +297,9 @@ def run_dps_evaluation(
                 likelihood=settings["likelihood"],
                 measurement_eps=float(settings["measurement_eps"]),
                 clip_denoised=bool(settings["clip_denoised"]),
+                max_guidance_update_norm=(
+                    None if max_update_norm is None else float(max_update_norm)
+                ),
                 initial_noise=initial_noise,
                 sampling_noises=sampling_noises,
                 per_sample_diagnostics=True,
@@ -311,6 +320,8 @@ def run_dps_evaluation(
                 batch_residual = measurement_residual(y_rx, predicted_y).cpu().tolist()
             for local_index, coordinate in enumerate(coordinates):
                 gradient_norms = [item["gradient_norm"][local_index] for item in diagnostics]
+                update_norms = [item["guidance_update_norm"][local_index] for item in diagnostics]
+                clipped_steps = [item["guidance_clipped"][local_index] for item in diagnostics]
                 record = {
                     "sample": len(records),
                     "modulation": batch["modulation"][local_index],
@@ -322,6 +333,9 @@ def run_dps_evaluation(
                     "measurement_residual": float(batch_residual[local_index]),
                     "final_measurement_gradient_norm": float(gradient_norms[-1]),
                     "mean_measurement_gradient_norm": float(np.mean(gradient_norms)),
+                    "mean_guidance_update_norm": float(np.mean(update_norms)),
+                    "max_guidance_update_norm": float(np.max(update_norms)),
+                    "guidance_clipped_fraction": float(np.mean(clipped_steps)),
                 }
                 if not np.isfinite([record[name] for name in METRIC_NAMES]).all():
                     raise FloatingPointError(f"non-finite DPS metric for coordinate {coordinate}")
@@ -350,6 +364,16 @@ def run_dps_evaluation(
             ),
             "mean_norm": float(
                 np.mean([record["mean_measurement_gradient_norm"] for record in records])
+            ),
+        },
+        "guidance_update": {
+            "all_finite": bool(
+                np.isfinite([record["mean_guidance_update_norm"] for record in records]).all()
+            ),
+            "mean_norm": float(np.mean([record["mean_guidance_update_norm"] for record in records])),
+            "max_norm": float(np.max([record["max_guidance_update_norm"] for record in records])),
+            "clipped_fraction": float(
+                np.mean([record["guidance_clipped_fraction"] for record in records])
             ),
         },
         "samples": records,

@@ -126,6 +126,11 @@ def test_zero_noise_uses_normalized_loss_and_gaussian_rejects_it():
         measurement, prediction, noise_variance=variance, likelihood="auto", eps=1e-8
     )
     torch.testing.assert_close(normalized, torch.ones_like(normalized))
+    for name in ("normalized", "normalized_squared"):
+        explicit = measurement_loss(
+            measurement, prediction, noise_variance=variance, likelihood=name, eps=1e-8
+        )
+        torch.testing.assert_close(explicit, normalized)
     try:
         measurement_loss(
             measurement, prediction, noise_variance=variance, likelihood="gaussian", eps=1e-8
@@ -145,6 +150,60 @@ def test_zero_noise_uses_normalized_loss_and_gaussian_rejects_it():
         eps=1e-8,
     )
     torch.testing.assert_close(mixed, torch.tensor([1.0, 8.0]))
+
+
+def test_normalized_l2_has_finite_bounded_residual_gradient():
+    measurement = torch.ones(1, 2, 4)
+    prediction = torch.full_like(measurement, -1000.0, requires_grad=True)
+    loss = measurement_loss(
+        measurement,
+        prediction,
+        noise_variance=torch.zeros(1),
+        likelihood="normalized_l2",
+        eps=1e-8,
+    )
+    gradient = torch.autograd.grad(loss.sum(), prediction)[0]
+    assert torch.isfinite(loss).all() and torch.isfinite(gradient).all()
+    assert gradient.norm() <= 1.0 / measurement.norm() + 1e-6
+
+    exact = measurement.detach().clone().requires_grad_(True)
+    exact_loss = measurement_loss(
+        measurement,
+        exact,
+        noise_variance=torch.zeros(1),
+        likelihood="normalized_l2",
+        eps=1e-8,
+    )
+    exact_gradient = torch.autograd.grad(exact_loss.sum(), exact)[0]
+    assert torch.isfinite(exact_gradient).all()
+    torch.testing.assert_close(exact_gradient, torch.zeros_like(exact_gradient))
+
+
+def test_dps_caps_each_sample_guidance_update():
+    class ZeroEpsilon(nn.Module):
+        def forward(self, values, _timesteps):
+            return torch.zeros_like(values)
+
+    diffusion = DDPMDiffusion(steps=8)
+    measurement = torch.zeros(2, 2, 16)
+    channel = torch.zeros(2, 2, 1)
+    channel[:, 0, 0] = 1.0
+    reconstruction, diagnostics = dps_sample(
+        ZeroEpsilon(),
+        diffusion,
+        measurement,
+        channel,
+        noise_variance=0.0,
+        sampling_steps=2,
+        guidance_scale=1e6,
+        likelihood="normalized_squared",
+        max_guidance_update_norm=0.25,
+        initial_noise=torch.ones_like(measurement),
+        per_sample_diagnostics=True,
+    )
+    assert torch.isfinite(reconstruction).all()
+    assert all(max(step["guidance_update_norm"]) <= 0.25 + 1e-6 for step in diagnostics)
+    assert all(all(step["guidance_clipped"]) for step in diagnostics)
 
 
 def test_fixed_validation_is_independent_of_global_rng(tmp_path):
@@ -224,9 +283,10 @@ def _training_config(dataset_path, output_root):
         "dps": {
             "sampling_steps": 2,
             "guidance_scale": 0.01,
-            "likelihood": "normalized",
+            "likelihood": "normalized_l2",
             "measurement_eps": 1e-8,
             "clip_denoised": False,
+            "max_guidance_update_norm": 1.0,
         },
         "dps_validation": {
             "enabled": False,

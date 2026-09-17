@@ -13,7 +13,13 @@ from .metrics import measurement_residual
 from .operators import ComplexFIRChannel
 
 
-Likelihood = Literal["auto", "normalized", "gaussian"]
+Likelihood = Literal[
+    "auto",
+    "normalized",
+    "normalized_squared",
+    "normalized_l2",
+    "gaussian",
+]
 
 
 def measurement_loss(
@@ -27,17 +33,34 @@ def measurement_loss(
     """Return one measurement loss per batch item."""
     residual_energy = (measurement - prediction).square().flatten(1).sum(1)
     measurement_energy = measurement.square().flatten(1).sum(1)
-    normalized = residual_energy / (measurement_energy + eps)
-    if likelihood == "normalized":
-        return normalized
+    normalized_squared = residual_energy / (measurement_energy + eps)
+    normalized_l2 = torch.sqrt(residual_energy + eps) / torch.sqrt(measurement_energy + eps)
+    if likelihood in {"normalized", "normalized_squared"}:
+        return normalized_squared
+    if likelihood == "normalized_l2":
+        return normalized_l2
     if likelihood == "gaussian":
         if bool((noise_variance <= 0).any()):
             raise ValueError("Gaussian likelihood requires strictly positive noise_variance")
         return residual_energy / (2.0 * noise_variance)
     if likelihood == "auto":
         gaussian = residual_energy / (2.0 * noise_variance.clamp_min(eps))
-        return torch.where(noise_variance > 0, gaussian, normalized)
-    raise ValueError("likelihood must be auto, normalized, or gaussian")
+        return torch.where(noise_variance > 0, gaussian, normalized_squared)
+    raise ValueError(
+        "likelihood must be auto, normalized, normalized_squared, normalized_l2, or gaussian"
+    )
+
+
+def _clip_guidance_update(
+    update: torch.Tensor, max_norm: float | None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Clip each sample's complete guidance update and return pre/post norms."""
+    raw_norms = update.flatten(1).norm(dim=1)
+    if max_norm is None:
+        return update, raw_norms, raw_norms
+    scale = (max_norm / raw_norms.clamp_min(torch.finfo(update.dtype).tiny)).clamp(max=1.0)
+    clipped = update * scale.view(-1, *([1] * (update.ndim - 1)))
+    return clipped, raw_norms, clipped.flatten(1).norm(dim=1)
 
 
 def dps_sample(
@@ -52,6 +75,7 @@ def dps_sample(
     likelihood: Likelihood = "auto",
     measurement_eps: float = 1e-8,
     clip_denoised: bool = False,
+    max_guidance_update_norm: float | None = None,
     initial_noise: torch.Tensor | None = None,
     sampling_noises: Sequence[torch.Tensor] | None = None,
     per_sample_diagnostics: bool = False,
@@ -62,6 +86,8 @@ def dps_sample(
         raise ValueError("measurement must have shape [B,2,T]")
     if guidance_scale < 0:
         raise ValueError("guidance_scale must be non-negative")
+    if max_guidance_update_norm is not None and max_guidance_update_norm <= 0:
+        raise ValueError("max_guidance_update_norm must be positive or None")
     device = measurement.device
     if isinstance(noise_variance, (float, int)):
         noise_variance = torch.full(
@@ -107,14 +133,23 @@ def dps_sample(
             prior_sample = diffusion.posterior_sample_from_x0(
                 current, x0, timestep, previous, noise=step_noise
             )
-            current = prior_sample - guidance_scale * gradient
+            guidance_update, raw_update_norms, update_norms = _clip_guidance_update(
+                guidance_scale * gradient, max_guidance_update_norm
+            )
+            current = prior_sample - guidance_update
+            if not torch.isfinite(current).all():
+                raise FloatingPointError(f"non-finite DPS state after timestep {timestep}")
             residuals = measurement_residual(measurement, predicted_measurement, measurement_eps)
             gradient_norms = gradient.flatten(1).norm(dim=1)
+            clipped = update_norms < raw_update_norms
             diagnostic = {
                 "timestep": float(timestep),
                 "measurement_loss_mean": float(losses.mean()),
                 "measurement_residual_mean": float(residuals.mean()),
                 "gradient_norm_mean": float(gradient_norms.mean()),
+                "guidance_update_norm_mean": float(update_norms.mean()),
+                "raw_guidance_update_norm_mean": float(raw_update_norms.mean()),
+                "guidance_clipped_fraction": float(clipped.float().mean()),
             }
             if per_sample_diagnostics:
                 diagnostic.update(
@@ -122,6 +157,9 @@ def dps_sample(
                         "measurement_loss": losses.detach().cpu().tolist(),
                         "measurement_residual": residuals.detach().cpu().tolist(),
                         "gradient_norm": gradient_norms.detach().cpu().tolist(),
+                        "guidance_update_norm": update_norms.detach().cpu().tolist(),
+                        "raw_guidance_update_norm": raw_update_norms.detach().cpu().tolist(),
+                        "guidance_clipped": clipped.detach().cpu().tolist(),
                     }
                 )
             diagnostics.append(diagnostic)

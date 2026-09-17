@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
+
+# PyTorch requires this before CUDA/cuBLAS initialization for deterministic GEMMs.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 from rdps.data import SPLIT_NAMES
 from rdps.evaluation import run_checkpoint_evaluation
@@ -18,7 +22,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int)
     parser.add_argument("--sampling-steps", type=int)
     parser.add_argument("--guidance-scale", type=float)
-    parser.add_argument("--likelihood", choices=("auto", "normalized", "gaussian"))
+    parser.add_argument(
+        "--likelihood",
+        choices=("auto", "normalized", "normalized_squared", "normalized_l2", "gaussian"),
+    )
+    parser.add_argument("--max-guidance-update-norm", type=float)
     parser.add_argument("--evaluation-seed", type=int)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps", "mlx"))
@@ -38,6 +46,7 @@ def main() -> int:
             "sampling_steps": args.sampling_steps,
             "guidance_scale": args.guidance_scale,
             "likelihood": args.likelihood,
+            "max_guidance_update_norm": args.max_guidance_update_norm,
             "seed": args.evaluation_seed,
             "batch_size": args.batch_size,
             "device": args.device,
