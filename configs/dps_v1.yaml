@@ -27,8 +27,8 @@ diffusion:
 
 training:
   output_root: outputs/train
-  resume_output_dir: null
-  epochs: 100
+  resume_output_dir: null  # null: new run; set an existing output directory to resume
+  epochs: 100  # final target epoch, including epochs already completed before resume
   batch_size: 512
   learning_rate: 0.0002
   weight_decay: 0.00001

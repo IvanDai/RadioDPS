@@ -21,6 +21,13 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
     return value
 
 
+def optional_path(value: str) -> Path | None:
+    """Parse a CLI path while accepting explicit YAML-style null values."""
+    if value.lower() in {"none", "null"}:
+        return None
+    return Path(value)
+
+
 def save_yaml(path: str | Path, value: dict[str, Any]) -> None:
     with Path(path).open("w", encoding="utf-8") as stream:
         yaml.safe_dump(value, stream, sort_keys=False)

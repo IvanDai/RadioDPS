@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import torch
 from torch import nn
@@ -55,6 +55,7 @@ def dps_sample(
     initial_noise: torch.Tensor | None = None,
     sampling_noises: Sequence[torch.Tensor] | None = None,
     per_sample_diagnostics: bool = False,
+    progress: Callable[[int, int], None] | None = None,
 ) -> tuple[torch.Tensor, list[dict[str, Any]]]:
     """Run Algorithm 1-style DPS from Gaussian noise."""
     if measurement.ndim != 3 or measurement.shape[1] != 2:
@@ -124,4 +125,6 @@ def dps_sample(
                     }
                 )
             diagnostics.append(diagnostic)
+        if progress is not None:
+            progress(index + 1, len(sequence))
     return current.detach(), diagnostics

@@ -25,7 +25,7 @@ from .data import HDF5WaveformDataset, balanced_subset_indices
 from .diffusion import DDPMDiffusion
 from .evaluation import evaluation_settings, fixed_diffusion_validation, run_dps_evaluation
 from .model import UNet1D
-from .progress import EpochProgress, format_duration
+from .progress import EpochProgress, PhaseProgress, format_duration
 from .utils import JsonlLogger, create_run_directory, resolve_device, save_yaml, seed_everything, write_json
 
 
@@ -241,6 +241,7 @@ def train(config: dict[str, Any], *, output_root: str | Path | None = None) -> P
         )
 
     history = JsonlLogger(output / "history.jsonl")
+    dps_history = JsonlLogger(output / "dps_history.jsonl")
     batch_size = int(config["training"]["batch_size"])
     num_workers = int(config["dataset"].get("num_workers", 0))
     gradient_clip = float(config["training"]["gradient_clip"])
@@ -275,16 +276,21 @@ def train(config: dict[str, Any], *, output_root: str | Path | None = None) -> P
                 device=device,
             )
             validation_started = time.monotonic()
-            latest_validation_loss = fixed_diffusion_validation(
-                model,
-                diffusion,
-                validation_dataset,
-                validation_indices,
-                device=device,
-                seed=int(validation_config["seed"]),
-                noise_repeats=int(validation_config.get("noise_repeats", 1)),
-                batch_size=int(validation_config["batch_size"]),
-            )
+            validation_progress = PhaseProgress(epoch, total_epochs, "Valid")
+            try:
+                latest_validation_loss = fixed_diffusion_validation(
+                    model,
+                    diffusion,
+                    validation_dataset,
+                    validation_indices,
+                    device=device,
+                    seed=int(validation_config["seed"]),
+                    noise_repeats=int(validation_config.get("noise_repeats", 1)),
+                    batch_size=int(validation_config["batch_size"]),
+                    progress=validation_progress.update,
+                )
+            finally:
+                validation_progress.finish()
             validation_seconds = time.monotonic() - validation_started
             improved = latest_validation_loss < best_validation_loss - float(early_config.get("min_delta", 0.0))
             if improved:
@@ -299,26 +305,8 @@ def train(config: dict[str, Any], *, output_root: str | Path | None = None) -> P
                 flush=True,
             )
 
-            dps_summary = None
-            if bool(dps_validation_config.get("enabled", True)) and epoch % int(dps_validation_config["every_epochs"]) == 0:
-                dps_output = evaluations_dir / "validation" / f"epoch_{epoch:04d}"
-                dps_summary = run_dps_evaluation(
-                    model,
-                    diffusion,
-                    validation_dataset,
-                    device=device,
-                    settings=evaluation_settings(config, "dps_validation"),
-                    output_dir=dps_output,
-                    save_reconstructions=False,
-                    context={"epoch": epoch, "global_step": global_step, "device": str(device)},
-                )
-                macro = dps_summary["metrics"]["macro"]
-                print(
-                    f"Epoch {epoch:03d}/{total_epochs} | DPS | NMSE={macro['nmse']:.4f} "
-                    f"| residual={macro['measurement_residual']:.4f}",
-                    flush=True,
-                )
-
+            # Persist the completed epoch before optional DPS validation, which is
+            # substantially slower and must not put the train/validation state at risk.
             payload = _checkpoint_payload(
                 model=model,
                 optimizer=optimizer,
@@ -337,6 +325,7 @@ def train(config: dict[str, Any], *, output_root: str | Path | None = None) -> P
             save_checkpoint(checkpoint_dir / "last.pt", payload)
             if epoch % save_every == 0:
                 save_checkpoint(checkpoint_dir / f"epoch_{epoch:04d}.pt", payload)
+            completed_epoch = epoch
             history.log(
                 {
                     "epoch": epoch,
@@ -348,10 +337,41 @@ def train(config: dict[str, Any], *, output_root: str | Path | None = None) -> P
                     "early_stopping_bad_epochs": bad_epochs,
                     "train_seconds": train_seconds,
                     "validation_seconds": validation_seconds,
-                    "dps": None if dps_summary is None else dps_summary["metrics"],
                 }
             )
-            completed_epoch = epoch
+
+            dps_summary = None
+            if bool(dps_validation_config.get("enabled", True)) and epoch % int(dps_validation_config["every_epochs"]) == 0:
+                dps_output = evaluations_dir / "validation" / f"epoch_{epoch:04d}"
+                dps_progress = PhaseProgress(epoch, total_epochs, "DPS")
+                try:
+                    dps_summary = run_dps_evaluation(
+                        model,
+                        diffusion,
+                        validation_dataset,
+                        device=device,
+                        settings=evaluation_settings(config, "dps_validation"),
+                        output_dir=dps_output,
+                        save_reconstructions=False,
+                        context={"epoch": epoch, "global_step": global_step, "device": str(device)},
+                        progress=dps_progress.update,
+                    )
+                finally:
+                    dps_progress.finish()
+                macro = dps_summary["metrics"]["macro"]
+                print(
+                    f"Epoch {epoch:03d}/{total_epochs} | DPS | NMSE={macro['nmse']:.4f} "
+                    f"| residual={macro['measurement_residual']:.4f}",
+                    flush=True,
+                )
+                dps_history.log(
+                    {
+                        "epoch": epoch,
+                        "global_step": global_step,
+                        "metrics": dps_summary["metrics"],
+                        "output_dir": str(dps_output),
+                    }
+                )
             if bool(early_config.get("enabled", True)) and bad_epochs >= int(early_config["patience"]):
                 stopped_early = True
                 print(

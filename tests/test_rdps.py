@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from unittest.mock import patch
 
 import h5py
 import numpy as np
@@ -15,6 +17,7 @@ from rdps.evaluation import fixed_diffusion_validation
 from rdps.model import UNet1D
 from rdps.operators import ComplexFIRChannel
 from rdps.training import train
+from rdps.utils import optional_path
 
 
 def _iq(values: np.ndarray) -> np.ndarray:
@@ -97,6 +100,7 @@ def test_unet_diffusion_and_dps_shapes_are_finite():
     channel = torch.zeros(1, 2, 3)
     channel[:, 0, 0] = 1.0
     measurement = torch.randn(1, 2, 32)
+    progress_updates = []
     reconstruction, diagnostics = dps_sample(
         ZeroEpsilon(),
         diffusion,
@@ -105,10 +109,12 @@ def test_unet_diffusion_and_dps_shapes_are_finite():
         noise_variance=0.0,
         sampling_steps=4,
         guidance_scale=0.01,
+        progress=lambda completed, total: progress_updates.append((completed, total)),
     )
     assert reconstruction.shape == measurement.shape
     assert torch.isfinite(reconstruction).all()
     assert len(diagnostics) == 4
+    assert progress_updates == [(1, 4), (2, 4), (3, 4), (4, 4)]
     assert all(np.isfinite(item["gradient_norm_mean"]) for item in diagnostics)
 
 
@@ -150,9 +156,19 @@ def test_fixed_validation_is_independent_of_global_rng(tmp_path):
     model.train()
     diffusion = DDPMDiffusion(steps=4)
     indices, _ = balanced_subset_indices(dataset, None, seed=10)
+    progress_updates = []
     first = fixed_diffusion_validation(
-        model, diffusion, dataset, indices, device=torch.device("cpu"), seed=22, noise_repeats=2, batch_size=2
+        model,
+        diffusion,
+        dataset,
+        indices,
+        device=torch.device("cpu"),
+        seed=22,
+        noise_repeats=2,
+        batch_size=2,
+        progress=lambda completed, total: progress_updates.append((completed, total)),
     )
+    assert progress_updates == [(1, 4), (2, 4), (3, 4), (4, 4)]
     torch.manual_seed(999)
     _ = torch.randn(100)
     second = fixed_diffusion_validation(
@@ -165,6 +181,12 @@ def test_fixed_validation_is_independent_of_global_rng(tmp_path):
     )
     assert np.isclose(first, different_batching, rtol=1e-6)
     dataset.close()
+
+
+def test_resume_cli_none_is_explicit_new_run():
+    assert optional_path("none") is None
+    assert optional_path("NULL") is None
+    assert optional_path("outputs/example") == Path("outputs/example")
 
 
 def _training_config(dataset_path, output_root):
@@ -283,3 +305,30 @@ def test_early_stopping_restores_best_epoch_for_final_test(tmp_path):
     assert metrics["completed_epoch"] == 2
     assert metrics["best_epoch"] == 1
     assert "test_best_epoch_0001_after_0002" in metrics["final_test_output"]
+
+
+def test_checkpoint_is_saved_before_dps_validation_failure(tmp_path):
+    dataset_path = tmp_path / "dataset.h5"
+    _minimal_dataset(dataset_path)
+    output_root = tmp_path / "outputs"
+    config = _training_config(dataset_path, output_root)
+    config["dps_validation"]["enabled"] = True
+
+    with patch("rdps.training.run_dps_evaluation", side_effect=RuntimeError("DPS failed")):
+        try:
+            train(config)
+        except RuntimeError as error:
+            assert str(error) == "DPS failed"
+        else:
+            raise AssertionError("DPS failure must propagate")
+
+    outputs = list(output_root.glob("train_*"))
+    assert len(outputs) == 1
+    last = load_checkpoint(outputs[0] / "checkpoints/last.pt")
+    best = load_checkpoint(outputs[0] / "checkpoints/best.pt")
+    assert last["completed_epoch"] == 1
+    assert last["global_step"] == 2
+    assert best["completed_epoch"] == 1
+    history = (outputs[0] / "history.jsonl").read_text().splitlines()
+    assert len(history) == 1
+    assert json.loads(history[0])["epoch"] == 1

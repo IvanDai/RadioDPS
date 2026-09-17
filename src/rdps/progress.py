@@ -50,3 +50,35 @@ class EpochProgress:
             flush=True,
         )
         return elapsed
+
+
+class PhaseProgress:
+    """Render a compact work-unit progress line for validation phases."""
+
+    def __init__(self, epoch: int, total_epochs: int, phase: str, *, width: int = 20):
+        self.epoch = epoch
+        self.total_epochs = total_epochs
+        self.phase = phase
+        self.width = width
+        self.started = time.monotonic()
+        self.dynamic = sys.stdout.isatty()
+
+    def update(self, completed: int, total: int) -> None:
+        if not self.dynamic:
+            return
+        fraction = completed / max(total, 1)
+        filled = min(self.width, int(self.width * fraction))
+        bar = "█" * filled + "░" * (self.width - filled)
+        elapsed = time.monotonic() - self.started
+        eta = elapsed / completed * (total - completed) if completed else 0.0
+        message = (
+            f"Epoch {self.epoch}/{self.total_epochs} {self.phase} [{bar}] "
+            f"{completed}/{total} | ETA={format_duration(eta)}"
+        )
+        sys.stdout.write("\r\033[2K" + message)
+        sys.stdout.flush()
+
+    def finish(self) -> None:
+        if self.dynamic:
+            sys.stdout.write("\r\033[2K")
+            sys.stdout.flush()

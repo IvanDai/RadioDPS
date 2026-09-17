@@ -185,12 +185,19 @@ known-channel operator 严格计算
 
 新训练会创建带 UTC 时间戳的独立目录；resume 则继续使用原目录。训练以 epoch 为单位，
 每个 epoch 使用固定 validation seed 和固定 `(t, epsilon)` 条件比较 loss，并在 epoch
-结束保存 `last.pt`。`best.pt` 只由 validation loss 决定，Early Stopping 的 patience
-状态随 checkpoint 恢复。周期 DPS 只访问 validation split；训练或 Early Stopping 完成
-后才加载 `best.pt` 并访问 test split。
+结束、开始 DPS validation 前保存 `last.pt`。`best.pt` 只由 validation loss 决定，Early
+Stopping 的 patience 状态随 checkpoint 恢复；DPS validation 中断不会丢失已完成 epoch。
+周期 DPS 只访问 validation split；训练或 Early Stopping 完成后才加载 `best.pt` 并访问
+test split。
+
+交互式终端中，Train 每个 batch 原地更新当前/平均 loss 和 ETA；Validation 按 batch、
+DPS Validation 按 reverse diffusion timestep 原地更新进度。每个阶段完成后只保留一行
+汇总，重定向到文件或非交互环境时不会写入终端控制字符。
 
 训练目录包含实际 `config.yaml`、`split.json`、`validation_selection.json`、
-`history.jsonl`、`metrics.json`、checkpoint 以及 validation/test evaluation 子目录。
+`history.jsonl`、`dps_history.jsonl`、`metrics.json`、checkpoint 以及 validation/test
+evaluation 子目录。train/validation history 与 checkpoint 在 DPS validation 前同步写入，
+周期 DPS 指标成功完成后再写入独立 history。
 推理目录包含实际配置、确定性选择坐标、逐样本/per-modulation/macro/micro 指标、
 `reconstructions.h5` 和少量时域、频谱、IQ 散点对比图。这里定义
 
@@ -206,7 +213,10 @@ known-channel operator 严格计算
 内部由 evaluation seed 确定性抽样。正式汇总以 modulation macro mean 为主，同时保存
 普通 sample micro mean。若样本数少于 modulation 数量，程序会明确警告覆盖不完整。
 
-resume 配置使用 `training.resume_output_dir`。checkpoint 会校验数据集 signature、split、
+resume 配置使用 `training.resume_output_dir`：`null` 创建新实验，已有输出目录则从其中的
+`checkpoints/last.pt` 继续。CLI 可用 `--resume-output none` 明确覆盖配置并创建新实验。
+`--epochs` 始终表示训练结束时的目标总 epoch，而不是在已有 epoch 上追加的数量。
+checkpoint 会校验数据集 signature、split、
 训练 seed、模型、diffusion、batch size、optimizer 超参数、固定 validation 设置和 Early
 Stopping 设置；只有 epochs、device、worker、显示与纯评估设置可以调整。旧的 step-based
 format-v1 checkpoint 不具备完整 epoch/patience 状态，因此会被明确拒绝，避免伪精确续训。

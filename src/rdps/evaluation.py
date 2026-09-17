@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import tempfile
 import time
-from typing import Any
+from typing import Any, Callable
 
 import h5py
 import numpy as np
@@ -26,6 +26,7 @@ from .utils import create_run_directory, resolve_device, save_yaml, write_json
 
 
 METRIC_NAMES = ("mse", "nmse", "measurement_residual")
+ProgressCallback = Callable[[int, int], None]
 
 
 def _derived_seed(root_seed: int, coordinate: tuple[int, int, int], stream: int) -> int:
@@ -92,6 +93,7 @@ def fixed_diffusion_validation(
     seed: int,
     noise_repeats: int,
     batch_size: int,
+    progress: ProgressCallback | None = None,
 ) -> float:
     """Evaluate identical timestep/noise draws at every epoch."""
     if not indices:
@@ -100,6 +102,9 @@ def fixed_diffusion_validation(
         raise ValueError("noise_repeats and validation batch_size must be positive")
     squared_error = 0.0
     element_count = 0
+    batches_per_repeat = (len(indices) + batch_size - 1) // batch_size
+    total_batches = noise_repeats * batches_per_repeat
+    completed_batches = 0
     was_training = model.training
     model.eval()
     try:
@@ -128,6 +133,9 @@ def fixed_diffusion_validation(
                 prediction = model(noisy, timesteps)
                 squared_error += float((prediction - noise).square().sum())
                 element_count += noise.numel()
+                completed_batches += 1
+                if progress is not None:
+                    progress(completed_batches, total_batches)
     finally:
         model.train(was_training)
     return squared_error / element_count
@@ -225,6 +233,7 @@ def run_dps_evaluation(
     output_dir: str | Path | None = None,
     save_reconstructions: bool = False,
     context: dict[str, Any] | None = None,
+    progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     if float(settings["measurement_eps"]) <= 0:
         raise ValueError("DPS measurement_eps must be positive")
@@ -244,6 +253,8 @@ def run_dps_evaluation(
     records: list[dict[str, Any]] = []
     arrays: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
     sequence = diffusion.sampling_timesteps(int(settings["sampling_steps"]))
+    total_batches = (len(selected) + batch_size - 1) // batch_size
+    total_progress_steps = total_batches * len(sequence)
     started = time.monotonic()
     with _evaluation_model(model):
         for offset in range(0, len(selected), batch_size):
@@ -283,6 +294,14 @@ def run_dps_evaluation(
                 initial_noise=initial_noise,
                 sampling_noises=sampling_noises,
                 per_sample_diagnostics=True,
+                progress=(
+                    None
+                    if progress is None
+                    else lambda completed, _total, batch=offset // batch_size: progress(
+                        batch * len(sequence) + completed,
+                        total_progress_steps,
+                    )
+                ),
             )
             x_tx = batch["x_tx"].to(device)
             with torch.no_grad():

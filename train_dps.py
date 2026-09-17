@@ -7,7 +7,7 @@ import argparse
 from pathlib import Path
 
 from rdps.training import train
-from rdps.utils import load_yaml
+from rdps.utils import load_yaml, optional_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -15,9 +15,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path("configs/dps_v1.yaml"))
     parser.add_argument("--dataset", type=Path, help="override dataset.path")
     parser.add_argument("--output", type=Path, help="override training.output_root")
-    parser.add_argument("--resume-output", type=Path, help="existing training output directory")
+    parser.add_argument(
+        "--resume-output",
+        type=optional_path,
+        default=argparse.SUPPRESS,
+        metavar="DIR|none",
+        help="resume DIR; use 'none' to force a new run (overrides config)",
+    )
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps", "mlx"))
-    parser.add_argument("--epochs", type=int, help="override training.epochs")
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        help="final target epoch, not additional epochs when resuming",
+    )
     return parser.parse_args()
 
 
@@ -26,13 +36,16 @@ def main() -> int:
     config = load_yaml(args.config)
     if args.dataset is not None:
         config["dataset"]["path"] = str(args.dataset)
-    if args.resume_output is not None:
-        config["training"]["resume_output_dir"] = str(args.resume_output.resolve())
+    if hasattr(args, "resume_output"):
+        config["training"]["resume_output_dir"] = (
+            None if args.resume_output is None else str(args.resume_output.resolve())
+        )
     if args.device is not None:
         config["device"] = args.device
     if args.epochs is not None:
         if args.epochs < 1:
             raise ValueError("--epochs must be positive")
+        # This is the absolute target epoch, including work restored by resume.
         config["training"]["epochs"] = args.epochs
     output = train(config, output_root=args.output)
     print(f"Training output: {output}")
