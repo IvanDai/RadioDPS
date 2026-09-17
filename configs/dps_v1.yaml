@@ -56,7 +56,7 @@ dps:
 
 dps_validation:
   enabled: true
-  every_epochs: 10
+  every_epochs: 1
   seed: 20233
   sample_count: 8
   batch_size: 4
