@@ -76,6 +76,7 @@ def dps_sample(
     measurement_eps: float = 1e-8,
     clip_denoised: bool = False,
     max_guidance_update_norm: float | None = None,
+    use_ddim: bool = False,
     initial_noise: torch.Tensor | None = None,
     sampling_noises: Sequence[torch.Tensor] | None = None,
     per_sample_diagnostics: bool = False,
@@ -125,14 +126,17 @@ def dps_sample(
             raise FloatingPointError(f"non-finite measurement gradient at timestep {timestep}")
 
         with torch.no_grad():
-            step_noise = None
-            if sampling_noises is not None:
-                step_noise = sampling_noises[index].to(device=device, dtype=current.dtype)
-                if step_noise.shape != current.shape:
-                    raise ValueError("each sampling noise tensor must match measurement shape")
-            prior_sample = diffusion.posterior_sample_from_x0(
-                current, x0, timestep, previous, noise=step_noise
-            )
+            if use_ddim:
+                prior_sample = diffusion.ddim_sample_from_x0(current, x0, timestep, previous)
+            else:
+                step_noise = None
+                if sampling_noises is not None:
+                    step_noise = sampling_noises[index].to(device=device, dtype=current.dtype)
+                    if step_noise.shape != current.shape:
+                        raise ValueError("each sampling noise tensor must match measurement shape")
+                prior_sample = diffusion.posterior_sample_from_x0(
+                    current, x0, timestep, previous, noise=step_noise
+                )
             guidance_update, raw_update_norms, update_norms = _clip_guidance_update(
                 guidance_scale * gradient, max_guidance_update_norm
             )
@@ -150,6 +154,7 @@ def dps_sample(
                 "guidance_update_norm_mean": float(update_norms.mean()),
                 "raw_guidance_update_norm_mean": float(raw_update_norms.mean()),
                 "guidance_clipped_fraction": float(clipped.float().mean()),
+                "sampler": "ddim" if use_ddim else "ddpm",
             }
             if per_sample_diagnostics:
                 diagnostic.update(

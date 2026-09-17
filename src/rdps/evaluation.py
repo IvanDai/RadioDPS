@@ -157,6 +157,7 @@ def evaluation_settings(config: dict[str, Any], section_name: str) -> dict[str, 
         "max_guidance_update_norm": section.get(
             "max_guidance_update_norm", dps.get("max_guidance_update_norm")
         ),
+        "use_ddim": bool(section.get("use_ddim", dps.get("use_ddim", False))),
     }
 
 
@@ -276,16 +277,18 @@ def run_dps_evaluation(
                 stream=30_000,
                 dtype=y_rx.dtype,
             ).to(device)
-            sampling_noises = [
-                _noise_for_coordinates(
-                    coordinates,
-                    tuple(y_rx.shape[1:]),
-                    seed=int(settings["seed"]),
-                    stream=40_000 + timestep,
-                    dtype=y_rx.dtype,
-                )
-                for timestep in sequence
-            ]
+            sampling_noises = None
+            if not bool(settings["use_ddim"]):
+                sampling_noises = [
+                    _noise_for_coordinates(
+                        coordinates,
+                        tuple(y_rx.shape[1:]),
+                        seed=int(settings["seed"]),
+                        stream=40_000 + timestep,
+                        dtype=y_rx.dtype,
+                    )
+                    for timestep in sequence
+                ]
             reconstructed, diagnostics = dps_sample(
                 model,
                 diffusion,
@@ -300,6 +303,7 @@ def run_dps_evaluation(
                 max_guidance_update_norm=(
                     None if max_update_norm is None else float(max_update_norm)
                 ),
+                use_ddim=bool(settings["use_ddim"]),
                 initial_noise=initial_noise,
                 sampling_noises=sampling_noises,
                 per_sample_diagnostics=True,

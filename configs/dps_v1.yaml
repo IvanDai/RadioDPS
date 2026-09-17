@@ -52,6 +52,7 @@ dps:
   measurement_eps: 1.0e-8
   clip_denoised: false
   max_guidance_update_norm: 1.0
+  use_ddim: false  # false: stochastic ancestral DDPM; true: deterministic DDIM (eta=0)
 
 dps_validation:
   enabled: true

@@ -204,6 +204,11 @@ DiffCom 使用观测残差 L2 norm 的做法。为避免旧 checkpoint 静默改
 裁剪比例。该上限是数值保护，不替代在 validation 上标定 guidance scale。由于合法射频
 波形幅度会超过 `[-1, 1]`，这里没有照搬图像模型的 `clip_denoised=True`。
 
+DPS reverse sampler 可通过 `dps.use_ddim` 选择。`false` 使用带随机后验噪声的
+respaced ancestral DDPM，`true` 使用确定性的 DDIM（`eta=0`）；默认配置显式设为
+`false`。命令行可用 `--ddim` 开启、`--no-ddim` 关闭。两种模式使用相同的 timestep
+序列和 measurement guidance，区别只在无条件 reverse diffusion update。
+
 服务器上另一个 CuBLAS warning 与上述梯度发散无关：开启 PyTorch deterministic
 algorithms 后，CUDA 10.2 及以上还要求在 cuBLAS 初始化前设置
 `CUBLAS_WORKSPACE_CONFIG`。`train_dps.py` 和 `run_dps.py` 会以 `setdefault` 设置官方建议
@@ -290,6 +295,7 @@ MLX 模型实现。
       --dataset datasets/smoke/dps_smoke.h5 --split test --num-samples 4 \
       --sampling-steps 50 --guidance-scale 0.05 --evaluation-seed 3017 \
       --likelihood normalized_l2 --max-guidance-update-norm 1.0 \
+      --no-ddim \
       --batch-size 2 --device cpu \
       --output outputs/smoke/dps
 

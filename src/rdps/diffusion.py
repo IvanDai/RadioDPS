@@ -126,6 +126,21 @@ class DDPMDiffusion(nn.Module):
             noise = torch.randn_like(noisy)
         return mean + variance.sqrt() * noise
 
+    def ddim_sample_from_x0(
+        self,
+        noisy: torch.Tensor,
+        x0: torch.Tensor,
+        timestep: int,
+        previous_timestep: int,
+    ) -> torch.Tensor:
+        """Return the deterministic DDIM (eta=0) update for an arbitrary previous timestep."""
+        if previous_timestep < 0:
+            return x0
+        alpha_bar_t = self.alpha_bars[timestep].to(dtype=noisy.dtype)
+        alpha_bar_s = self.alpha_bars[previous_timestep].to(dtype=noisy.dtype)
+        epsilon = (noisy - alpha_bar_t.sqrt() * x0) / (1.0 - alpha_bar_t).sqrt()
+        return alpha_bar_s.sqrt() * x0 + (1.0 - alpha_bar_s).sqrt() * epsilon
+
     @torch.no_grad()
     def sample(
         self,

@@ -116,6 +116,55 @@ def test_unet_diffusion_and_dps_shapes_are_finite():
     assert len(diagnostics) == 4
     assert progress_updates == [(1, 4), (2, 4), (3, 4), (4, 4)]
     assert all(np.isfinite(item["gradient_norm_mean"]) for item in diagnostics)
+    assert all(item["sampler"] == "ddpm" for item in diagnostics)
+
+
+def test_ddim_switch_selects_deterministic_reverse_update():
+    class ZeroEpsilon(nn.Module):
+        def forward(self, values, _timesteps):
+            return torch.zeros_like(values)
+
+    diffusion = DDPMDiffusion(steps=8)
+    measurement = torch.randn(1, 2, 16)
+    channel = torch.zeros(1, 2, 1)
+    channel[:, 0, 0] = 1.0
+    initial = torch.randn_like(measurement)
+    noises_a = [torch.randn_like(measurement) for _ in range(4)]
+    noises_b = [torch.randn_like(measurement) for _ in range(4)]
+
+    ddim_a, diagnostics = dps_sample(
+        ZeroEpsilon(), diffusion, measurement, channel,
+        noise_variance=0.0, sampling_steps=4, guidance_scale=0.0,
+        use_ddim=True, initial_noise=initial, sampling_noises=noises_a,
+    )
+    ddim_b, _ = dps_sample(
+        ZeroEpsilon(), diffusion, measurement, channel,
+        noise_variance=0.0, sampling_steps=4, guidance_scale=0.0,
+        use_ddim=True, initial_noise=initial, sampling_noises=noises_b,
+    )
+    ddpm_a, _ = dps_sample(
+        ZeroEpsilon(), diffusion, measurement, channel,
+        noise_variance=0.0, sampling_steps=4, guidance_scale=0.0,
+        use_ddim=False, initial_noise=initial, sampling_noises=noises_a,
+    )
+    ddpm_b, _ = dps_sample(
+        ZeroEpsilon(), diffusion, measurement, channel,
+        noise_variance=0.0, sampling_steps=4, guidance_scale=0.0,
+        use_ddim=False, initial_noise=initial, sampling_noises=noises_b,
+    )
+    torch.testing.assert_close(ddim_a, ddim_b)
+    assert not torch.equal(ddpm_a, ddpm_b)
+    assert all(item["sampler"] == "ddim" for item in diagnostics)
+
+    timestep, previous = 7, 3
+    batch_t = torch.tensor([timestep])
+    predicted_x0 = diffusion.predict_x0(initial, batch_t, torch.zeros_like(initial))
+    expected = (
+        diffusion.alpha_bars[previous].sqrt() * predicted_x0
+        + (1.0 - diffusion.alpha_bars[previous]).sqrt() * torch.zeros_like(initial)
+    )
+    actual = diffusion.ddim_sample_from_x0(initial, predicted_x0, timestep, previous)
+    torch.testing.assert_close(actual, expected)
 
 
 def test_zero_noise_uses_normalized_loss_and_gaussian_rejects_it():
@@ -287,6 +336,7 @@ def _training_config(dataset_path, output_root):
             "measurement_eps": 1e-8,
             "clip_denoised": False,
             "max_guidance_update_norm": 1.0,
+            "use_ddim": False,
         },
         "dps_validation": {
             "enabled": False,

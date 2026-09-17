@@ -27,6 +27,12 @@ def parse_args() -> argparse.Namespace:
         choices=("auto", "normalized", "normalized_squared", "normalized_l2", "gaussian"),
     )
     parser.add_argument("--max-guidance-update-norm", type=float)
+    parser.add_argument(
+        "--ddim",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="enable deterministic DDIM sampling; --no-ddim uses ancestral DDPM",
+    )
     parser.add_argument("--evaluation-seed", type=int)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps", "mlx"))
@@ -47,6 +53,7 @@ def main() -> int:
             "guidance_scale": args.guidance_scale,
             "likelihood": args.likelihood,
             "max_guidance_update_norm": args.max_guidance_update_norm,
+            "use_ddim": args.ddim,
             "seed": args.evaluation_seed,
             "batch_size": args.batch_size,
             "device": args.device,
